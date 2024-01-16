@@ -1,0 +1,149 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function zero_d7_exporter_menu() {
+  $items['api/json/zero/exporter/batch'] = [
+    'access callback' => true,
+    'page callback' => 'zero_d7_exporter_batch_page',
+    'delivery callback' => 'drupal_json_output',
+  ];
+
+  $items['api/json/zero/exporter/index'] = [
+    'access callback' => true,
+    'page callback' => 'zero_d7_exporter_index_page',
+    'delivery callback' => 'drupal_json_output',
+  ];
+
+  $items['api/json/zero/exporter/data'] = [
+    'access callback' => true,
+    'page callback' => 'zero_d7_exporter_data_page',
+    'delivery callback' => 'drupal_json_output',
+  ];
+
+  return $items;
+}
+
+function zero_d7_exporter_get_error($type, $cause, $message) {
+  return ['error' => [
+    'id' => $type,
+    'cause' => $cause,
+    'message' => $message,
+  ]];
+}
+
+function zero_d7_exporter_create_select($params, $info) {
+  $select = db_select($info['base table'], 'base');
+  $select->addField('base', $info['entity keys']['id'], 'id');
+  $select->addField('base', $info['entity keys']['label'], 'label');
+  $select->addField('base', $info['entity keys']['bundle'], 'bundle');
+
+  if (!empty($params['conditions'])) {
+    foreach ($params['conditions'] as $value) {
+      if (strpos($value[0], '[') === 0 && strpos($value[0], ']') === strlen($value[0]) - 1) {
+        $value[0] = $info['entity keys'][substr($value[0], 1, strlen($value[0]) - 2)];
+      }
+      $select->condition(...$value);
+    }
+  }
+  return $select;
+}
+
+function zero_d7_exporter_batch_page() {
+  try {
+    $params = drupal_get_query_parameters();
+    if (empty($params['entity'])) {
+      return zero_d7_exporter_get_error('get.parameter.error', 'entity', 'Please use the GET parameter "entity" to define the entity type.');
+    }
+    $range = $params['range'] ?? 1000;
+
+    $info = entity_get_info($params['entity']);
+
+    $select = zero_d7_exporter_create_select($params, $info);
+    $output['pager'] = [
+      'range' => $range,
+    ];
+    $output['pager']['total'] = $select->countQuery()->execute()->fetchField();
+    if ($range === 'null' || $range === 0) {
+      $output['pager']['page_count'] = $output['pager']['total'];
+    } else {
+      $output['pager']['page_count'] = floor($output['pager']['total'] / $range);
+    }
+    return $output;
+  } catch (Throwable $e) {
+
+  }
+}
+
+function zero_d7_exporter_index_page() {
+  try {
+    $params = drupal_get_query_parameters();
+    if (empty($params['entity'])) {
+      return zero_d7_exporter_get_error('get.parameter.error', 'entity', 'Please use the GET parameter "entity" to define the entity type.');
+    }
+
+    $info = entity_get_info($params['entity']);
+
+    $select = zero_d7_exporter_create_select($params, $info);
+
+    $page = $params['page'] ?? 0;
+    $range = $params['range'] ?? 1000;
+
+    if ($range !== 'null') {
+      $select->range($page * $range, $range);
+    }
+
+    $output = [];
+    $output['pager'] = [
+      'page' => $page,
+      'range' => $range,
+    ];
+    $output['items'] = [];
+    foreach ($select->execute()->fetchAllAssoc('id') as $row) {
+      $output['items'][] = $row;
+    }
+
+    $select = zero_d7_exporter_create_select($params, $info);
+    $output['pager']['items'] = $select->countQuery()->execute()->fetchField();
+    if ($range === 'null' || $range === 0) {
+      $output['pager']['page_count'] = $output['pager']['items'];
+    } else {
+      $output['pager']['page_count'] = floor($output['pager']['items'] / $range);
+    }
+
+    return $output;
+  } catch (Throwable $e) {
+    return zero_d7_exporter_get_error('unknown.error', 'unknown', $e->getMessage());
+  }
+}
+
+function zero_d7_exporter_data_page() {
+  try {
+    $params = drupal_get_query_parameters();
+    if (empty($params['entity'])) {
+      return zero_d7_exporter_get_error('get.parameter.error', 'entity', 'Please use the GET parameter "entity" to define the entity type.');
+    }
+    if (empty($params['id'])) {
+      return zero_d7_exporter_get_error('get.parameter.error', 'id', 'Please use the GET parameter "id" to define the id of the entity.');
+    }
+    $entity = entity_load($params['entity'], [$params['id']]);
+    $info = entity_get_info($params['entity']);
+
+    $output = [];
+    $output['params'] = $params;
+    $output['entity'] = $entity[$params['id']];
+    $fields = field_info_instances($params['entity'], $output['entity']->{$info['entity keys']['bundle']});
+    foreach ($fields as $name => $field) {
+      $field_info = field_info_field($name);
+      if (in_array($field_info['type'], ['image', 'file'])) {
+        if (!empty($output['entity']->$name['und'][0]['uri'])) {
+          $output['entity']->$name['und'][0]['fullpath'] = file_create_url($output['entity']->$name['und'][0]['uri']);
+        }
+      }
+    }
+    return $output;
+  } catch (Throwable $e) {
+    return zero_d7_exporter_get_error('unknown.error', 'unknown', $e->getMessage());
+  }
+}

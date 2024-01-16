@@ -1,0 +1,4 @@
+name = ZERO D7 Exporter
+description = Create D7 Export Pages
+core = 7.x
+package = ZERO
