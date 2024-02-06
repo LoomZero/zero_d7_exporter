@@ -22,6 +22,11 @@ function zero_d7_exporter_menu() {
     'delivery callback' => 'drupal_json_output',
   ];
 
+  $items['api/json/zero/exporter/file'] = [
+    'access callback' => true,
+    'page callback' => 'zero_d7_exporter_file_page',
+  ];
+
   return $items;
 }
 
@@ -39,14 +44,24 @@ function zero_d7_exporter_create_select($params, $info) {
   if (!empty($info['entity keys']['label'])) {
     $select->addField('base', $info['entity keys']['label'], 'label');
   }
-  if (!empty($info['entity keys']['bundle'])) {
-    $select->addField('base', $info['entity keys']['bundle'], 'bundle');
+  if ($params['entity'] === 'taxonomy_term') {
+    $select->innerJoin('taxonomy_vocabulary', 'v', 'base.vid = v.vid');
+    $select->addField('base', 'vid', 'vid');
+    $select->addField('v', 'machine_name', 'bundle');
+  } else {
+    if (!empty($info['entity keys']['bundle'])) {
+      $select->addField('base', $info['entity keys']['bundle'], 'bundle');
+    }
   }
 
   if (!empty($params['conditions'])) {
     foreach ($params['conditions'] as $value) {
       if (strpos($value[0], '[') === 0 && strpos($value[0], ']') === strlen($value[0]) - 1) {
-        $value[0] = $info['entity keys'][substr($value[0], 1, strlen($value[0]) - 2)];
+        if ($params['entity'] === 'taxonomy_term' && $value[0] === '[bundle]') {
+          $value[0] = 'v.machine_name';
+        } else {
+          $value[0] = $info['entity keys'][substr($value[0], 1, strlen($value[0]) - 2)];
+        }
       }
       $select->condition(...$value);
     }
@@ -107,6 +122,7 @@ function zero_d7_exporter_index_page() {
     $params = [];
     $output = [];
     zero_d7_exporter_prepare_request($params, $output);
+    $output['params'] = $params;
 
     if (empty($params['entity'])) {
       return zero_d7_exporter_get_error('get.parameter.error', 'entity', 'Please use the GET parameter "entity" to define the entity type.');
@@ -123,7 +139,6 @@ function zero_d7_exporter_index_page() {
       $select->range($page * $range, $range);
     }
 
-    $output['params'] = $params;
     $output['pager'] = [
       'page' => $page,
       'range' => $range,
@@ -181,7 +196,41 @@ function zero_d7_exporter_data_page() {
         $output['entity']->profiles[$type] = profile2_load_by_user($params['id'], $type);
       }
     }
+    if ($params['entity'] === 'taxonomy_term' && $params['parents'] === '1') {
+      $output['entity']->parents = taxonomy_get_parents($output['entity']->tid);
+    }
     return $output;
+  } catch (Throwable $e) {
+    return zero_d7_exporter_get_error('unknown.error', 'unknown', $e->getMessage());
+  }
+}
+
+function zero_d7_exporter_file_page() {
+  try {
+    $params = [];
+    $output = [];
+    zero_d7_exporter_prepare_request($params, $output);
+
+    if (empty($output['_user'])) {
+      drupal_add_http_header('Status', '404 Not Found');
+      return 'Please login first to retrieve the file.';
+    }
+
+    if (empty($params['file'])) {
+      return zero_d7_exporter_get_error('get.parameter.error', 'file', 'Please use the GET parameter "file" to define the file.');
+    }
+
+    $file = file_load($params['file']);
+
+    $realpath = drupal_realpath($file->uri);
+    if (!is_file($realpath)) {
+      drupal_add_http_header('Status', '404 Not Found');
+      return 'No file found.';
+    }
+    drupal_add_http_header('Cache-Control', 'private');
+    drupal_add_http_header('Content-Type', 'application/pdf');
+    readfile($realpath);
+    return NULL;
   } catch (Throwable $e) {
     return zero_d7_exporter_get_error('unknown.error', 'unknown', $e->getMessage());
   }
