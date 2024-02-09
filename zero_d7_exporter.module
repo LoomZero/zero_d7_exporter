@@ -189,6 +189,10 @@ function zero_d7_exporter_data_page() {
       }
     }
 
+    if ($params['entity'] === 'node') {
+      $output['entity']->alias = drupal_lookup_path('alias', 'node/' . $output['entity']->nid);
+    }
+
     if ($params['entity'] === 'user' && function_exists('profile2_get_types')) {
       $types = profile2_get_types();
       $output['entity']->profiles = [];
