@@ -191,6 +191,29 @@ function zero_d7_exporter_data_page() {
 
     if ($params['entity'] === 'node') {
       $output['entity']->alias = drupal_lookup_path('alias', 'node/' . $output['entity']->nid);
+      $rid_query = db_select('redirect');
+      $rid_query->addField('redirect', 'rid');
+      $rid_query->addField('redirect', 'source');
+      $rid_query->addField('redirect', 'language');
+      $rid_query->addField('redirect', 'status_code');
+      $rid_query->condition('redirect', db_like('node/' . $output['entity']->nid), 'LIKE');
+      $redirects = [];
+      foreach ($rid_query->execute()->fetchAllAssoc('rid') as $rid => $redirect) {
+        $redirects[] = $redirect;
+      }
+      $output['entity']->redirects = $redirects;
+    }
+
+    // add panels if possible
+    if (function_exists('panelizer_entity_load')) {
+      $entities = [$output['entity']];
+      panelizer_entity_load($entities, $params['entity']);
+      if (!empty($output['entity']->panelizer['page_manager']->display)) {
+        /** @var panels_display $display */
+        $display = $output['entity']->panelizer['page_manager']->display;
+
+        $output['entity']->panels = $display->panels;
+      }
     }
 
     if ($params['entity'] === 'user' && function_exists('profile2_get_types')) {
